@@ -55,3 +55,15 @@ python src/main.py
 The program will show saved URLs from `config/sources.csv`.
 
 You can choose one, multiple, a range, or all sources.
+
+Examples:
+
+```text
+1
+1,3,5
+1-4
+all
+none
+```
+
+You can also add a custom URL when prompted.
