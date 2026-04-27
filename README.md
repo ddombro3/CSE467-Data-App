@@ -2,7 +2,7 @@
 
 # LLM Privacy Data Extractor
 
-This project is a Python scraper that collects privacy-related evidence from public LLM privacy policies and documentation.
+This project is a Python scraper that collects privacy related evidence from public LLM privacy policies and documentation.
 
 It lets the user choose saved URLs from `config/sources.csv` or enter a custom URL. The program scrapes the selected webpage, searches for privacy-related keywords, and saves the results into CSV and Excel files.
 
