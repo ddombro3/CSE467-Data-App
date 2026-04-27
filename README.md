@@ -36,3 +36,22 @@ From the project folder, run:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+```
+
+Your terminal should show `(.venv)`.
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Run the program
+
+```bash
+python src/main.py
+```
+
+The program will show saved URLs from `config/sources.csv`.
+
+You can choose one, multiple, a range, or all sources.
