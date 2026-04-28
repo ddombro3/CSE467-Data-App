@@ -1,17 +1,7 @@
-"""
-LLM Privacy Data Extractor.
-
-Default behavior:
-    Shows an interactive CLI menu.
-    User can select URLs from config/sources.csv or add custom URLs.
-    Scrapes selected URLs.
-    Saves raw text into data/raw/.
-    Extracts privacy-related keyword matches.
-    Saves results into data/output/.
-"""
-
 from pathlib import Path
 import argparse
+import subprocess
+import sys
 import pandas as pd
 
 from openpyxl import load_workbook
@@ -26,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
+THREAT_OUTPUT_DIR = PROJECT_ROOT / "data" / "threat_output"
 
 SOURCES_CSV = CONFIG_DIR / "sources.csv"
 
@@ -54,27 +45,36 @@ def parse_args():
         description="Extract privacy-related data from LLM platform privacy policies and documentation."
     )
 
-    parser.add_argument(
-        "--url",
-        help="Single privacy policy or documentation URL to scrape."
-    )
+    parser.add_argument("--url", help="Single privacy policy or documentation URL to scrape.")
 
     parser.add_argument(
         "--platform",
         default="Unknown Platform",
-        help="Platform name for single URL mode. Example: Claude"
+        help="Platform name for single URL mode. Example: Claude",
     )
 
     parser.add_argument(
         "--source-name",
         default="Unknown Source",
-        help='Source name for single URL mode. Example: "Anthropic Privacy Policy"'
+        help='Source name for single URL mode. Example: "Anthropic Privacy Policy"',
     )
 
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Run all URLs from config/sources.csv without showing the interactive menu."
+        help="Run all URLs from config/sources.csv without showing the interactive menu.",
+    )
+
+    parser.add_argument(
+        "--run-threat-model",
+        action="store_true",
+        help="Run the threat model analyzer after scraper extraction finishes.",
+    )
+
+    parser.add_argument(
+        "--threat-model-only",
+        action="store_true",
+        help="Skip scraping and run the threat model analyzer using existing scraper output.",
     )
 
     return parser.parse_args()
@@ -194,11 +194,13 @@ def collect_custom_sources():
         if not source_name:
             source_name = "Custom Source"
 
-        custom_sources.append({
-            "platform": platform,
-            "source_name": source_name,
-            "url": url,
-        })
+        custom_sources.append(
+            {
+                "platform": platform,
+                "source_name": source_name,
+                "url": url,
+            }
+        )
 
         print("Custom source added.")
         print()
@@ -383,70 +385,63 @@ def format_results_for_master_data(raw_results):
         category = row.get("data_category")
         sentence = row.get("matching_sentence")
 
-        formatted_rows.append({
-            "Platform": row.get("platform"),
-            "Source_Name": row.get("source_name"),
-            "Source URL": row.get("source_url"),
-            "Source_Type": infer_source_type(
-                row.get("source_name", ""),
-                row.get("source_url", ""),
-            ),
-            "Evidence_Quote": sentence,
-            "Data_Type": row.get("keyword"),
-            "Category": category,
-            "Collection_Type": infer_collection_type(category),
-            "Consumer_or_Api": infer_consumer_or_api(
-                row.get("source_name", ""),
-                row.get("source_url", ""),
-            ),
-            "Purpose_Stated": build_purpose_stated(category, sentence),
-            "Retention_Stated": build_retention_stated(category, sentence),
-            "Training_Use_Stated": build_training_use_stated(category, sentence),
-            "Third_Party_Sharing_Stated": build_third_party_sharing_stated(category, sentence),
-            "Disclosure_Quality": "Extracted keyword match - needs manual review",
-            "Sensitivity": infer_sensitivity(category),
-            "Notes": f"Matched keyword: {row.get('keyword')}",
-        })
+        formatted_rows.append(
+            {
+                "Platform": row.get("platform"),
+                "Source_Name": row.get("source_name"),
+                "Source URL": row.get("source_url"),
+                "Source_Type": infer_source_type(
+                    row.get("source_name", ""),
+                    row.get("source_url", ""),
+                ),
+                "Evidence_Quote": sentence,
+                "Data_Type": row.get("keyword"),
+                "Category": category,
+                "Collection_Type": infer_collection_type(category),
+                "Consumer_or_Api": infer_consumer_or_api(
+                    row.get("source_name", ""),
+                    row.get("source_url", ""),
+                ),
+                "Purpose_Stated": build_purpose_stated(category, sentence),
+                "Retention_Stated": build_retention_stated(category, sentence),
+                "Training_Use_Stated": build_training_use_stated(category, sentence),
+                "Third_Party_Sharing_Stated": build_third_party_sharing_stated(category, sentence),
+                "Disclosure_Quality": "Extracted keyword match - needs manual review",
+                "Sensitivity": infer_sensitivity(category),
+                "Notes": f"Matched keyword: {row.get('keyword')}",
+            }
+        )
 
     return formatted_rows
 
 
 def format_excel_file(excel_path):
-    """
-    Applies readable formatting to the Excel output:
-        - wider columns
-        - wrapped headers
-        - wrapped evidence text
-        - frozen header row
-        - auto filter
-    """
     workbook = load_workbook(excel_path)
     worksheet = workbook.active
     worksheet.title = "Master_Data"
 
     column_widths = {
-        "A": 18,  # Platform
-        "B": 34,  # Source_Name
-        "C": 55,  # Source URL
-        "D": 22,  # Source_Type
-        "E": 90,  # Evidence_Quote
-        "F": 26,  # Data_Type
-        "G": 30,  # Category
-        "H": 28,  # Collection_Type
-        "I": 30,  # Consumer_or_Api
-        "J": 60,  # Purpose_Stated
-        "K": 60,  # Retention_Stated
-        "L": 60,  # Training_Use_Stated
-        "M": 60,  # Third_Party_Sharing_Stated
-        "N": 42,  # Disclosure_Quality
-        "O": 20,  # Sensitivity
-        "P": 38,  # Notes
+        "A": 18,
+        "B": 34,
+        "C": 55,
+        "D": 22,
+        "E": 90,
+        "F": 26,
+        "G": 30,
+        "H": 28,
+        "I": 30,
+        "J": 60,
+        "K": 60,
+        "L": 60,
+        "M": 60,
+        "N": 42,
+        "O": 20,
+        "P": 38,
     }
 
     for column_letter, width in column_widths.items():
         worksheet.column_dimensions[column_letter].width = width
 
-    # fix header
     for cell in worksheet[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(
@@ -457,7 +452,82 @@ def format_excel_file(excel_path):
 
     worksheet.row_dimensions[1].height = 45
 
-    # format rows so its not bunched up
+    for row in worksheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(
+                vertical="top",
+                wrap_text=True,
+            )
+
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+
+    workbook.save(excel_path)
+
+def format_extraction_summary_excel_file(excel_path):
+    workbook = load_workbook(excel_path)
+    worksheet = workbook.active
+    worksheet.title = "Extraction_Summary"
+
+    column_widths = {
+        "A": 18,  # platform
+        "B": 36,  # source_name
+        "C": 36,  # data_category
+        "D": 16,  # match_count
+    }
+
+    for column_letter, width in column_widths.items():
+        worksheet.column_dimensions[column_letter].width = width
+
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
+
+    worksheet.row_dimensions[1].height = 32
+
+    for row in worksheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(
+                vertical="top",
+                wrap_text=True,
+            )
+
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+
+    workbook.save(excel_path)
+
+
+def format_threat_summary_excel_file(excel_path):
+    workbook = load_workbook(excel_path)
+    worksheet = workbook.active
+    worksheet.title = "Threat_Summary"
+
+    column_widths = {
+        "A": 18,
+        "B": 36,
+        "C": 58,
+        "D": 70,
+        "E": 14,
+    }
+
+    for column_letter, width in column_widths.items():
+        worksheet.column_dimensions[column_letter].width = width
+
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
+
+    worksheet.row_dimensions[1].height = 38
+
     for row in worksheet.iter_rows(min_row=2):
         for cell in row:
             cell.alignment = Alignment(
@@ -485,6 +555,58 @@ def save_master_data_output(formatted_results):
     format_excel_file(excel_path)
 
     return df, csv_path, excel_path
+
+
+def run_threat_model_analysis():
+    threat_model_script = (
+        PROJECT_ROOT
+        / "analysis_tools"
+        / "threat_model"
+        / "threat_model_analyzer.py"
+    )
+
+    input_file = OUTPUT_DIR / "master_data_privacy_output.xlsx"
+
+    if not threat_model_script.exists():
+        print("Threat model analyzer script not found.")
+        print(f"Expected: {threat_model_script}")
+        return
+
+    if not input_file.exists():
+        print("Scraper output file not found.")
+        print(f"Expected: {input_file}")
+        print("Run the scraper first before running threat model analysis.")
+        return
+
+    print()
+    print("Running privacy threat model analysis...")
+    print(f"Input file: {input_file}")
+    print()
+
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(threat_model_script),
+                "--input",
+                str(input_file),
+            ],
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        print("Threat model analysis failed.")
+        print(f"Error: {error}")
+        return
+
+    summary_file = THREAT_OUTPUT_DIR / "privacy_threat_summary.xlsx"
+
+    if summary_file.exists():
+        format_threat_summary_excel_file(summary_file)
+
+    print()
+    print("Threat model analysis finished.")
+    print("Threat model output saved in:")
+    print(THREAT_OUTPUT_DIR)
 
 
 def run_extraction(sources):
@@ -532,6 +654,8 @@ def run_extraction(sources):
         excel_path=summary_excel_path,
     )
 
+    format_extraction_summary_excel_file(summary_excel_path)
+
     print("Extraction complete.")
     print(f"Total rows extracted: {len(master_df)}")
     print(f"Master-format CSV saved to: {master_csv_path}")
@@ -543,6 +667,10 @@ def run_extraction(sources):
 
 def main():
     args = parse_args()
+
+    if args.threat_model_only:
+        run_threat_model_analysis()
+        return
 
     cli_sources = build_sources_from_args(args)
 
@@ -565,6 +693,14 @@ def main():
         return
 
     run_extraction(sources)
+
+    if args.run_threat_model:
+        run_threat_model_analysis()
+        return
+
+    print()
+    if ask_yes_no("Run privacy threat model analysis now? (y/n): "):
+        run_threat_model_analysis()
 
 
 if __name__ == "__main__":
