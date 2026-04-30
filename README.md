@@ -67,3 +67,5 @@ none
 ```
 
 You can also add a custom URL when prompted.
+
+A second stage processing module then maps findings to PANOPTIC and LINDDUN-based threat categories.
