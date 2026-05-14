@@ -1,4 +1,4 @@
-# CSE467-Data-App
+# Data-App
 
 # LLM Privacy Data Extractor
 
